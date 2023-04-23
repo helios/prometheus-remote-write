@@ -1,8 +1,28 @@
+
+const Sha256 = require("@aws-crypto/sha256-js");
+const SignatureV4 = require("@aws-sdk/signature-v4");
+const HttpRequest = require("@aws-sdk/protocol-http");
 const SnappyJS = require("snappyjs");
-const fetch = require("node-fetch");
 const protobuf = require("protobufjs");
-const btoa = (s) => Buffer.from(s, "binary").toString("base64");
 const prom = require("./prom");
+const axios =  require("axios");
+
+// Host and paths
+const awsManagedPrometheusHostname = 'aps-workspaces.us-east-1.amazonaws.com';
+const pathPrefix = '/workspaces/ws-52968a87-d2a6-41ac-8992-065d813ef1da/api/v1';
+const awsManagedPrometheusRemoteWrite = `${pathPrefix}/remote_write`;
+const credentials =
+    {
+              accessKeyId: process.env.PROM_QUERY_AWS_ACCESS_KEY_ID,
+              secretAccessKey: process.env.PROM_QUERY_AWS_SECRET_ACCESS_KEY,
+          };
+
+const signer = new SignatureV4.SignatureV4({
+  service: 'aps',
+  region: 'us-east-1',
+  sha256: Sha256.Sha256,
+  credentials,
+});
 
 const __holder = {
   type: null,
@@ -54,7 +74,6 @@ async function serialize(payload, options) {
  * @return {Promise<import("./types").Result>}
  */
 async function pushTimeseries(timeseries, options) {
-  const orig = timeseries;
   // Brush up a little
   timeseries = !Array.isArray(timeseries) ? [timeseries] : timeseries;
 
@@ -90,52 +109,30 @@ async function pushTimeseries(timeseries, options) {
     logger.info("Serialized in", start2 - start1, "ms");
   }
 
-  if (options?.url) {
-    /** @type import("./types").MinimalFetch */
-    let fetch = options.fetch ||  require("node-fetch").default
-    return fetch(options?.url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/vnd.google.protobuf",
-        ...(options?.auth?.username && options?.auth?.password
-          ? {
-              Authorization: "Basic " + btoa(options?.auth.username + ":" + options?.auth?.password),
-            }
-          : undefined),
-      },
+    const request = new HttpRequest.HttpRequest({
+      method: 'POST',
+      protocol: 'https:',
+      path: awsManagedPrometheusRemoteWrite,
       body: SnappyJS.compress(buffer),
-      timeout: options.timeout,
-    }).then(async (r) => {
-      const text = await r.text();
-
-      if (options?.verbose && r.status != 200) {
-        logger.warn("Failed to send write request, error", r.status + " " + r.statusText + " " + text, writeRequest);
-      } else if (options?.verbose && !options?.timing) {
-        logger.info("Write request sent", r.status + " " + r.statusText + " " + text, writeRequest);
-      } else if (options?.verbose && options?.timing) {
-        logger.info(
-          "Write request sent",
-          r.status + " " + r.statusText + " in",
-          Date.now() - start2,
-          "ms",
-          writeRequest
-        );
-      }
+      headers: {
+          host: awsManagedPrometheusHostname,
+          "Content-Type": "application/vnd.google.protobuf",
+      },
+      hostname: awsManagedPrometheusHostname,
+  });
+  const signedRequest = await signer.sign(request);
+  const url = `https://${signedRequest.hostname}${signedRequest.path}`;
+  const response = await axios.default.post(url, signedRequest.body, { headers: signedRequest.headers});
+  if (response.status != 200) {
+    logger.warn("Failed to send write request, error", response.status + " " + response.statusText, writeRequest);
+  }
 
       return {
-        status: r.status,
-        statusText: r.statusText,
-        errorMessage: r.status !== 200 ? text : undefined,
+        status: response.status,
+        statusText: response.statusText,
+        errorMessage: response.status !== 200 ? response.statusText : undefined,
       };
-    });
-  } else {
-    return {
-      status: 400,
-      statusText: "Bad request",
-      errorMessage: "No endpoint configured",
-    };
   }
-}
 
 async function pushMetrics(metrics, options) {
   return pushTimeseries(
