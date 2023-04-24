@@ -1,4 +1,3 @@
-
 const Sha256 = require("@aws-crypto/sha256-js");
 const SignatureV4 = require("@aws-sdk/signature-v4");
 const HttpRequest = require("@aws-sdk/protocol-http");
@@ -7,22 +6,15 @@ const protobuf = require("protobufjs");
 const prom = require("./prom");
 const axios =  require("axios");
 
-// Host and paths
-const awsManagedPrometheusHostname = 'aps-workspaces.us-east-1.amazonaws.com';
-const pathPrefix = '/workspaces/ws-52968a87-d2a6-41ac-8992-065d813ef1da/api/v1';
-const awsManagedPrometheusRemoteWrite = `${pathPrefix}/remote_write`;
-const credentials =
-    {
-              accessKeyId: process.env.PROM_QUERY_AWS_ACCESS_KEY_ID,
-              secretAccessKey: process.env.PROM_QUERY_AWS_SECRET_ACCESS_KEY,
-          };
+function initSigner(awsAuth) {
+  return new SignatureV4.SignatureV4({
+    service: 'aps',
+    region: 'us-east-1',
+    sha256: Sha256.Sha256,
+    credentials: awsAuth,
+  });
 
-const signer = new SignatureV4.SignatureV4({
-  service: 'aps',
-  region: 'us-east-1',
-  sha256: Sha256.Sha256,
-  credentials,
-});
+}
 
 const __holder = {
   type: null,
@@ -74,6 +66,7 @@ async function serialize(payload, options) {
  * @return {Promise<import("./types").Result>}
  */
 async function pushTimeseries(timeseries, options) {
+
   // Brush up a little
   timeseries = !Array.isArray(timeseries) ? [timeseries] : timeseries;
 
@@ -108,8 +101,11 @@ async function pushTimeseries(timeseries, options) {
   if (options?.timing) {
     logger.info("Serialized in", start2 - start1, "ms");
   }
-
-    const request = new HttpRequest.HttpRequest({
+  const signer = initSigner(options?.awsAuth)
+  const awsManagedPrometheusHostname = options?.hostname;
+  const pathPrefix = options?.url;
+  const awsManagedPrometheusRemoteWrite = `${pathPrefix}/remote_write`;
+  const request = new HttpRequest.HttpRequest({
       method: 'POST',
       protocol: 'https:',
       path: awsManagedPrometheusRemoteWrite,
