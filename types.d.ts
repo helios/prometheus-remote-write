@@ -40,6 +40,11 @@ interface Options {
   timeout?: number;
   console?: Console;
   fetch?: MinimalFetch;
+  awsAuth?: {
+    accessKeyId?: string;
+    secretAccessKey?: string;
+  }
+  hostname?: string;
 }
 
 interface Result {
