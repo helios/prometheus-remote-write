@@ -1,4 +1,5 @@
 /// <reference types="node" />
+import { AwsCredentialIdentityProvider } from "@aws-sdk/types";
 
 interface Sample {
   value: number;
@@ -43,7 +44,7 @@ interface Options {
   awsAuth?: {
     accessKeyId?: string;
     secretAccessKey?: string;
-  }
+  } | AwsCredentialIdentityProvider
   hostname?: string;
 }
 
